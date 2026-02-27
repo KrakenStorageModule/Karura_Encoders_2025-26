@@ -4,6 +4,7 @@ By: Johan Kornet/ Karura US
 Code for running multiple AMT20 on a single Arduino Uno through SPI
 
 Configuration Guide:
+
 // --- Configure your encoder CS pins here ---
 
 const int NUM_ENCODERS = 1;  // Change to however many encoders you have
