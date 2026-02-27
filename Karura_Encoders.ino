@@ -1,92 +1,95 @@
 #include <SPI.h>
 
-#define baudRate 115200
-#define timoutLimit 100
+#define baudRate       115200
+#define timeoutLimit   100
 
-#define nop 0x00
-#define rd_pos 0x10
+#define nop            0x00
+#define rd_pos         0x10
 #define set_zero_point 0x70
 
-// --- Configure your encoder CS pins here ---
-const int NUM_ENCODERS = 2;  // Change to however many you have (max 8)
-const int CS_PINS[2] = {10, 9};
+#define PIN_SCK   D8
+#define PIN_MISO  D9
+#define PIN_MOSI  D10
 
-uint16_t positions[2];  // Stores the latest position for each encoder
+// One CS pin per encoder
+const uint8_t CS_PINS[] = { D3, D2, D4};  // Add/remove as needed
+const uint8_t NUM_ENCODERS = sizeof(CS_PINS) / sizeof(CS_PINS[0]);
 
 void setup() {
   Serial.begin(baudRate);
+  delay(2000);
 
-  // Initialize all CS pins HIGH (deselected)
-  for (int i = 0; i < NUM_ENCODERS; i++) {
+  // All CS pins high before SPI starts
+  for (uint8_t i = 0; i < NUM_ENCODERS; i++) {
     pinMode(CS_PINS[i], OUTPUT);
     digitalWrite(CS_PINS[i], HIGH);
   }
 
+  SPI.setRX(PIN_MISO);
+  SPI.setTX(PIN_MOSI);
+  SPI.setSCK(PIN_SCK);
   SPI.begin();
-  SPI.beginTransaction(SPISettings(500000, MSBFIRST, SPI_MODE0));
+  SPI.beginTransaction(SPISettings(250000, MSBFIRST, SPI_MODE1));
 
-  delay(500);  // Wait for all encoders to initialize
+  delay(500);
+
+  Serial.println("AMT203S-V Multi-Encoder Test - XIAO RP2350");
+  Serial.println();
 }
 
 void loop() {
-  // Read each encoder in sequence
-  for (int i = 0; i < NUM_ENCODERS; i++) {
+  for (uint8_t i = 0; i < NUM_ENCODERS; i++) {
     int16_t pos = readEncoder(i);
+
+    Serial.print("Encoder ");
+    Serial.print(i + 1);
+    Serial.print(": ");
+
     if (pos >= 0) {
-      positions[i] = (uint16_t)pos;
-      float deg = 360.0 * (float(positions[i]) / 4096.0);
-
-      Serial.print("Enc ");
-      Serial.print(i);
-      Serial.print(": ");
-      Serial.print(deg, 2);
-      Serial.print("°  (");
-      Serial.print(positions[i], DEC);
-      Serial.print(")\t");
+      float deg = 360.0f * ((float)pos / 4096.0f);
+      Serial.print(deg, 1);
+      Serial.print(" deg  (raw: ");
+      Serial.print(pos);
+      Serial.print(")");
     } else {
-      Serial.print("Enc ");
-      Serial.print(i);
-      Serial.print(": ERROR\t");
+      Serial.print("ERROR");
     }
-  }
-  Serial.println();
 
-  delay(250);
+    Serial.print("  |  ");
+  }
+
+  Serial.println();
+  delay(100);
 }
 
-// Returns 12-bit position (0–4095) on success, -1 on timeout
-int16_t readEncoder(int encoderIndex) {
+int16_t readEncoder(uint8_t encoderIndex) {
   uint8_t data;
   uint8_t timeoutCounter = 0;
-  uint16_t currentPosition;
-  int csPin = CS_PINS[encoderIndex];
 
-  // Send rd_pos command
-  data = SPIWriteTo(csPin, rd_pos);
+  data = SPIWriteTo(encoderIndex, rd_pos);
 
-  // Wait for rd_pos echo
-  while (data != rd_pos && timeoutCounter++ < timoutLimit) {
-    data = SPIWriteTo(csPin, nop);
+  while (data != rd_pos && timeoutCounter++ < timeoutLimit) {
+    data = SPIWriteTo(encoderIndex, nop);
   }
 
-  if (timeoutCounter < timoutLimit) {
-    currentPosition = (SPIWriteTo(csPin, nop) & 0x0F) << 8;
-    currentPosition |= SPIWriteTo(csPin, nop);
-    return (int16_t)currentPosition;
+  if (timeoutCounter >= timeoutLimit) {
+    return -1;
   }
 
-  return -1;  // Timeout
+  uint16_t pos  = (SPIWriteTo(encoderIndex, nop) & 0x0F) << 8;
+           pos |=  SPIWriteTo(encoderIndex, nop);
+
+  return (int16_t)pos;
 }
 
-// SPI transfer targeting a specific CS pin
-uint8_t SPIWriteTo(int csPin, uint8_t sendByte) {
-  uint8_t data;
+uint8_t SPIWriteTo(uint8_t encoderIndex, uint8_t sendByte) {
+  uint8_t csPin = CS_PINS[encoderIndex];
 
   digitalWrite(csPin, LOW);
-  data = SPI.transfer(sendByte);
+  delayMicroseconds(5);
+  uint8_t received = SPI.transfer(sendByte);
   digitalWrite(csPin, HIGH);
+  delayMicroseconds(25);
 
-  delayMicroseconds(20);
-
-  return data;
+  return received;
 }
